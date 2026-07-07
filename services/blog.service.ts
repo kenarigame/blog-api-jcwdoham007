@@ -1,32 +1,58 @@
 import { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../lib/prisma.js";
+import { PaginationQueryParams } from "../types/pagination.js";
 import { ApiError } from "../utils/api-error.js";
 import { slugify } from "../utils/slug.js";
+import { CreateBlogSchema } from "../validators/blog.validator.js";
 
-interface GetBlogsQuery {
-  page: number;
-  take: number;
-  sortOrder: string;
-  sortBy: string;
-  search: string;
-}
+export const getBlogsService = async (query: PaginationQueryParams) => {
+  const { page, take, sortOrder, sortBy, search } = query;
 
-interface CreateBlogBody {
-  title: string;
-  description: string;
-  category: string;
-  content: string;
-  thumbnail: string;
-}
+  const whereClause: Prisma.BlogWhereInput = {};
 
-export const getBlogsService = async (query: GetBlogsQuery) => {
+  if (search) {
+    whereClause.title = { contains: search, mode: "insensitive" };
+  }
+
+  const blogs = await prisma.blog.findMany({
+    where: whereClause,
+    skip: (page - 1) * take,
+    take: take,
+    orderBy: { [sortBy]: sortOrder },
+    include: { user: { select: { name: true } } },
+  });
+
+  const total = await prisma.blog.count({ where: whereClause });
+
+  return {
+    data: blogs,
+    meta: {
+      page: page,
+      take: take,
+      total: total,
+    },
+  };
 };
 
 export const getBlogBySlugService = async (slug: string) => {
+  const blog = await prisma.blog.findUnique({
+    where: { slug },
+    include: {
+      user: {
+        select: { name: true },
+      },
+    },
+  });
+
+  if (!blog) {
+    throw new ApiError("Blog not found!", 404);
+  }
+
+  return blog;
 };
 
 export const createBlogService = async (
-  body: CreateBlogBody,
+  body: CreateBlogSchema,
   userId: number,
 ) => {
   const blog = await prisma.blog.findUnique({
